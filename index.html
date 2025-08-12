@@ -1,49 +1,762 @@
-<!doctypehtml><html lang=id><meta charset=UTF-8><meta content="width=device-width,initial-scale=1"name=viewport><meta content=yes name=apple-mobile-web-app-capable><meta content=yes name=mobile-web-app-capable><title>Universal Stream Player</title><style>body,html{margin:0;padding:0;height:100%;background:#000;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}#container{position:relative;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;background:#000}#mjpegPlayer,#videoPlayer,#webrtcFrame{max-width:100%;max-height:100%;width:100%;height:auto;object-fit:contain;background:#000;display:none}#webrtcFrame{width:100vw;height:100vh;border:none}video-stream{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;background:#000;display:block}#error{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(40,40,40,.95);color:#fdd;padding:20px 24px;border-radius:8px;font-size:16px;text-align:center;z-index:10000;display:none;max-width:80%;box-shadow:0 4px 20px rgba(0,0,0,.5)}#offline{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(20,20,20,.95);color:#ff6b6b;padding:30px 40px;border-radius:12px;font-size:24px;font-weight:700;text-align:center;z-index:10001;display:none;border:2px solid #ff6b6b;box-shadow:0 8px 32px rgba(255,107,107,.3);animation:pulse 2s infinite}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.7}}#loading{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:18px;text-align:center;z-index:9998;display:block}.spinner{border:3px solid rgba(255,255,255,.3);border-top:3px solid #fff;border-radius:50%;width:30px;height:30px;animation:spin 1s linear infinite;margin:0 auto 15px}@keyframes spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}#instructions{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;text-align:center;z-index:9997;padding:20px;max-width:80%;display:none}.url-example{background:rgba(255,255,255,.1);padding:8px 12px;border-radius:4px;font-family:monospace;font-size:14px;margin:5px 0;word-break:break-all}</style><div id=container><video autoplay id=videoPlayer muted playsinline></video><img alt="MJPEG Stream"id=mjpegPlayer><iframe allow="autoplay; fullscreen; camera; microphone"id=webrtcFrame></iframe></div><div id=loading><div class=spinner></div><div>Memuat Universal Player...</div></div><div id=instructions><h2>🎥 Universal Stream Player</h2><p>Masukkan URL stream di hash(#)untuk memulai:<div class=url-example>#wss:constructor(){this.currentPlayer=null;this.currentType=null;this.errorEl=document.getElementById('error');this.offlineEl=document.getElementById('offline');this.loadingEl=document.getElementById('loading');this.instructionsEl=document.getElementById('instructions');this.videoEl=document.getElementById('videoPlayer');this.mjpegEl=document.getElementById('mjpegPlayer');this.webrtcEl=document.getElementById('webrtcFrame');this.container=document.getElementById('container');this.mjpegInterval=null;this.reconnectAttempts=0;this.maxReconnectAttempts=3;this.timeoutId=null;this.init()}
-showOffline(){this.hideLoading();this.hideError();this.offlineEl.style.display='block'}
-hideOffline(){this.offlineEl.style.display='none'}
-showError(message){this.hideLoading();this.hideOffline();this.errorEl.textContent=message;this.errorEl.style.display='block'}
-hideError(){this.errorEl.style.display='none'}
-hideElements(){this.videoEl.style.display='none';this.mjpegEl.style.display='none';this.webrtcEl.style.display='none';this.errorEl.style.display='none';this.offlineEl.style.display='none';this.instructionsEl.style.display='none'}
-showLoading(message='Loading...'){this.loadingEl.querySelector('div:last-child').textContent=message;this.loadingEl.style.display='block'}
-hideLoading(){this.loadingEl.style.display='none'}
-showInstructions(){this.instructionsEl.style.display='block';this.hideLoading()}
-hideInstructions(){this.instructionsEl.style.display='none'}
-hideAllPlayers(){this.videoEl.style.display='none';this.mjpegEl.style.display='none';this.webrtcEl.style.display='none';const existingStreams=this.container.querySelectorAll('video-stream');existingStreams.forEach(el=>el.remove())}
-cleanup(){this.hideError();this.hideAllPlayers();this.hideOffline();if(this.mjpegInterval){clearInterval(this.mjpegInterval);this.mjpegInterval=null}
-if(this.currentPlayer){try{if(this.currentType==='flv'&&this.currentPlayer.destroy){this.currentPlayer.destroy()}else if(this.currentType==='hls'&&this.currentPlayer.destroy){this.currentPlayer.destroy()}}catch(e){console.warn('Cleanup error:',e)}
-this.currentPlayer=null}
-this.currentType=null;this.reconnectAttempts=0}
-detectStreamType(url){const urlLower=url.toLowerCase();if(urlLower.includes('youtube.com')||urlLower.includes('youtu.be')){return'youtube'}
-if(url.startsWith('wss://')||url.startsWith('ws://')){return'websocket'}
-if(url.includes('webrtc')||url.includes('rtc')||(url.startsWith('http')&&(url.includes('player')||url.includes('stream.html')))){return'webrtc'}
-if(urlLower.includes('.jpg')||urlLower.includes('.jpeg')||urlLower.includes('.png')||urlLower.includes('mjpeg')||urlLower.includes('snapshot')||urlLower.includes('/img')||urlLower.includes('nph-zms')||urlLower.includes('/zm/')||urlLower.includes('cgi-bin')&&(urlLower.includes('monitor=')||urlLower.includes('cam='))||urlLower.includes('mjpg')||urlLower.includes('image.cgi')||urlLower.includes('video.cgi')&&urlLower.includes('resolution=')||urlLower.includes('axis-cgi')||urlLower.includes('/jpg/')||urlLower.includes('/motion/')||urlLower.includes('stream.jpg')||(urlLower.includes('cgi')&&(urlLower.includes('jpg')||urlLower.includes('image')))||(urlLower.includes('?')&&(urlLower.includes('scale=')||urlLower.includes('quality=')))&&!urlLower.includes('.flv')&&!urlLower.includes('.m3u8')&&!urlLower.includes('.mp4')){return'mjpeg'}
-if(urlLower.includes('.flv'))return'flv';if(urlLower.includes('.m3u8'))return'hls';if(urlLower.includes('.mp4')||urlLower.includes('.webm')||urlLower.includes('.ogv')||urlLower.includes('.mpeg'))return'native';if(url.includes('stream.html')||url.includes('src=')||url.includes('mode=')){return'websocket'}
-return'native'}
-async loadWebSocketModules(){const pairs=[['./js/video-stream.js','./js/video-rtc.js'],[location.origin+location.pathname.replace(/\/[^/]*$/,'/')+'js/video-stream.js',location.origin+location.pathname.replace(/\/[^/]*$/,'/')+'js/video-rtc.js'],['https://kertrtc.etnvps.click/video-stream.js','https://kertrtc.etnvps.click/video-rtc.js'],['https://alexxit.github.io/go2rtc/video-stream.js']];for(const pair of pairs){try{for(const url of pair){if(url)await import(url);}
-return!0}catch(err){console.warn('Failed to load modules from',pair,err)}}
-return!1}
-async playWebSocket(url){const modulesLoaded=await this.loadWebSocketModules();if(!modulesLoaded){throw new Error('Gagal memuat modul WebSocket. Pastikan file js tersedia atau server dapat diakses.')}
-let streams=[];let modes=[];let baseForApi=null;if(url.startsWith('wss://')||url.startsWith('ws://')){streams=[url];modes=['mse']}else if(url.includes('stream.html')){const u=new URL(url);baseForApi=u.origin;const params=u.searchParams;streams=params.getAll('src')||[params.get('src')].filter(Boolean);modes=params.getAll('mode')||['mse']}else if(url.includes('src=')){const params=new URLSearchParams(url);streams=params.getAll('src')||[params.get('src')].filter(Boolean);modes=params.getAll('mode')||['mse']}else{streams=[url];modes=['mse'];baseForApi='https://kertrtc.etnvps.click'}
-const vid=document.createElement('video-stream');vid.setAttribute('playsinline','');vid.setAttribute('autoplay','');vid.setAttribute('muted','');vid.background=!0;let srcToUse=streams[0];if(!(srcToUse.startsWith('wss://')||srcToUse.startsWith('ws://')||srcToUse.startsWith('http://')||srcToUse.startsWith('https://'))){if(baseForApi){srcToUse=baseForApi+'/api/ws?src='+encodeURIComponent(srcToUse)}else{srcToUse='https://kertrtc.etnvps.click/api/ws?src='+encodeURIComponent(srcToUse)}}
-vid.mode=modes[0]||'mse';vid.src=srcToUse;this.container.appendChild(vid);this.currentPlayer=vid;this.currentType='websocket';let loadingTimeout=setTimeout(()=>{this.hideLoading();loadingTimeout=null},10000);vid.addEventListener('playing',()=>{if(loadingTimeout){clearTimeout(loadingTimeout);loadingTimeout=null}
-this.hideLoading()});vid.addEventListener('error',(ev)=>{if(loadingTimeout){clearTimeout(loadingTimeout);loadingTimeout=null}
-console.error('WebSocket stream error:',ev);this.showOffline()});vid.addEventListener('abort',()=>{if(loadingTimeout){clearTimeout(loadingTimeout);loadingTimeout=null}
-this.showOffline()});vid.addEventListener('stalled',()=>{this.showOffline()})}
-async playFLV(url){if(!window.flvjs||!flvjs.isSupported()){throw new Error('Browser tidak mendukung FLV atau flv.js tidak tersedia')}
-this.videoEl.style.display='block';const player=flvjs.createPlayer({type:'flv',url:url},{enableStashBuffer:!1,isLive:!0});player.attachMediaElement(this.videoEl);player.load();this.currentPlayer=player;this.currentType='flv';player.on(flvjs.Events.ERROR,(errorType,errorDetail)=>{console.error('FLV Error:',errorType,errorDetail);this.showOffline()});this.videoEl.addEventListener('loadstart',()=>{this.hideLoading()});this.videoEl.addEventListener('error',()=>{this.showOffline()});this.videoEl.addEventListener('abort',()=>{this.showOffline()});this.videoEl.addEventListener('stalled',()=>{this.showOffline()});await player.play()}
-async playHLS(url){this.videoEl.style.display='block';if(Hls.isSupported()){const hls=new Hls();this.currentPlayer=hls;this.currentType='hls';hls.loadSource(url);hls.attachMedia(this.videoEl);hls.on(Hls.Events.MANIFEST_PARSED,async()=>{this.hideLoading();await this.videoEl.play()});hls.on(Hls.Events.ERROR,(event,data)=>{console.error('HLS Error:',data);if(data.fatal){this.showOffline()}});this.videoEl.addEventListener('error',()=>{this.showOffline()});this.videoEl.addEventListener('abort',()=>{this.showOffline()});this.videoEl.addEventListener('stalled',()=>{this.showOffline()})}else if(this.videoEl.canPlayType('application/vnd.apple.mpegurl')){this.videoEl.src=url;await this.videoEl.play()}else{throw new Error('Browser tidak mendukung HLS')}}
-async playNative(url){this.videoEl.style.display='block';this.videoEl.src=url;this.currentType='native';this.videoEl.addEventListener('loadedmetadata',()=>{this.hideLoading()});this.videoEl.addEventListener('error',()=>{this.showOffline()});this.videoEl.addEventListener('abort',()=>{this.showOffline()});this.videoEl.addEventListener('stalled',()=>{this.showOffline()});await this.videoEl.play()}
-playMJPEG(url){this.mjpegEl.style.display='block';this.currentType='mjpeg';let isFirstLoad=!0;let loadingTimeout;this.mjpegEl.onerror=()=>{if(loadingTimeout){clearTimeout(loadingTimeout);loadingTimeout=null}
-this.showOffline()};this.mjpegEl.onload=()=>{if(loadingTimeout){clearTimeout(loadingTimeout);loadingTimeout=null}
-if(isFirstLoad){this.hideLoading();isFirstLoad=!1}};const refreshImage=()=>{const urlWithTimestamp=url+(url.includes('?')?'&':'?')+'ts='+Date.now();this.mjpegEl.src=urlWithTimestamp};loadingTimeout=setTimeout(()=>{this.hideLoading();isFirstLoad=!1;loadingTimeout=null},10000);refreshImage();this.mjpegInterval=setInterval(refreshImage,3000)}
-playWebRTC(url){this.webrtcEl.style.display='block';this.webrtcEl.src=url;this.currentType='webrtc';this.webrtcEl.onload=()=>{this.hideLoading()};this.webrtcEl.onerror=()=>{this.showOffline()}}
-playYouTube(url){this.webrtcEl.style.display='block';this.currentType='youtube';let videoId='';if(url.includes('youtube.com/watch?v=')){videoId=url.split('v=')[1].split('&')[0]}else if(url.includes('youtu.be/')){videoId=url.split('youtu.be/')[1].split('?')[0]}else if(url.includes('youtube.com/embed/')){videoId=url.split('embed/')[1].split('?')[0]}else if(url.includes('youtube.com/live/')){videoId=url.split('live/')[1].split('?')[0]}
-if(!videoId){this.showError('URL YouTube tidak valid');return}
-const embedUrl=`https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&controls=1&rel=0&modestbranding=1&playsinline=1`;this.webrtcEl.src=embedUrl;let loadingTimeout=setTimeout(()=>{this.hideLoading();loadingTimeout=null},10000);this.webrtcEl.onload=()=>{if(loadingTimeout){clearTimeout(loadingTimeout);loadingTimeout=null}
-this.hideLoading()};this.webrtcEl.onerror=()=>{if(loadingTimeout){clearTimeout(loadingTimeout);loadingTimeout=null}
-this.showOffline()}}
-async playStream(url){this.cleanup();this.hideInstructions();this.showLoading('Mendeteksi format stream...');try{const streamType=this.detectStreamType(url);this.showLoading('Memuat player...');switch(streamType){case 'websocket':await this.playWebSocket(url);break;case 'flv':await this.playFLV(url);break;case 'hls':await this.playHLS(url);break;case 'mjpeg':this.playMJPEG(url);break;case 'webrtc':this.playWebRTC(url);break;case 'youtube':this.playYouTube(url);break;case 'native':default:await this.playNative(url);break}
-if(this.videoEl.style.display==='block'){this.videoEl.addEventListener('playing',()=>{this.hideLoading()});this.videoEl.addEventListener('waiting',()=>{})}}catch(error){console.error('Playback error:',error);this.showError(error.message||'Gagal memutar stream')}}
-init(){const hash=window.location.hash.substring(1);const url=hash?decodeURIComponent(hash):'';if(!url){this.showInstructions();return}
-this.playStream(url);window.addEventListener('hashchange',()=>{const newHash=window.location.hash.substring(1);const newUrl=newHash?decodeURIComponent(newHash):'';if(newUrl){this.playStream(newUrl)}else{this.cleanup();this.showInstructions()}})}}
-const player=new UniversalPlayer();</script>
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Universal Stream Player</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: black;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    #container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: black;
+    }
+
+    /* Video Elements */
+    #videoPlayer, #mjpegPlayer, #webrtcFrame {
+      max-width: 100%;
+      max-height: 100%;
+      width: 100%;
+      height: auto;
+      object-fit: contain;
+      background: black;
+      display: none;
+    }
+
+    #webrtcFrame {
+      width: 100vw;
+      height: 100vh;
+      border: none;
+    }
+
+    video-stream {
+      max-width: 100%;
+      max-height: 100%;
+      width: auto;
+      height: auto;
+      object-fit: contain;
+      background: black;
+      display: block;
+    }
+
+    #error {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(40, 40, 40, 0.95);
+      color: #ffdddd;
+      padding: 20px 24px;
+      border-radius: 8px;
+      font-size: 16px;
+      text-align: center;
+      z-index: 10000;
+      display: none;
+      max-width: 80%;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    }
+
+    #offline {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(20, 20, 20, 0.95);
+      color: #ff6b6b;
+      padding: 30px 40px;
+      border-radius: 12px;
+      font-size: 24px;
+      font-weight: bold;
+      text-align: center;
+      z-index: 10001;
+      display: none;
+      border: 2px solid #ff6b6b;
+      box-shadow: 0 8px 32px rgba(255, 107, 107, 0.3);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    #loading {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      font-size: 18px;
+      text-align: center;
+      z-index: 9998;
+      display: block;
+    }
+
+    .spinner {
+      border: 3px solid rgba(255, 255, 255, 0.3);
+      border-top: 3px solid #fff;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 15px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* Instructions */
+    #instructions {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      text-align: center;
+      z-index: 9997;
+      padding: 20px;
+      max-width: 80%;
+      display: none;
+    }
+
+    .url-example {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 14px;
+      margin: 5px 0;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <video id="videoPlayer" autoplay muted playsinline></video>
+    <img id="mjpegPlayer" alt="MJPEG Stream">
+    <iframe id="webrtcFrame" allow="autoplay; fullscreen; camera; microphone"></iframe>
+  </div>
+
+  <div id="loading">
+    <div class="spinner"></div>
+    <div>Memuat Universal Player...</div>
+  </div>
+
+  <div id="instructions">
+    <h2>🎥 Universal Stream Player</h2>
+  </div>
+
+
+  <div id="error" role="alert"></div>
+  <div id="offline">📡 CCTV SEDANG OFFLINE</div>
+
+  <!-- External Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/flv.js@1.6.2/dist/flv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+
+  <script type="module">
+    class UniversalPlayer {
+      constructor() {
+        this.currentPlayer = null;
+        this.currentType = null;
+
+        this.errorEl = document.getElementById('error');
+        this.offlineEl = document.getElementById('offline');
+        this.loadingEl = document.getElementById('loading');
+        this.instructionsEl = document.getElementById('instructions');
+        this.videoEl = document.getElementById('videoPlayer');
+        this.mjpegEl = document.getElementById('mjpegPlayer');
+        this.webrtcEl = document.getElementById('webrtcFrame');
+        this.container = document.getElementById('container');
+        
+        this.mjpegInterval = null;
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 3;
+        this.timeoutId = null;
+        
+        this.init();
+      }
+
+
+
+
+
+      showOffline() {
+        this.hideLoading();
+        this.hideError();
+        this.offlineEl.style.display = 'block';
+      }
+
+      hideOffline() {
+        this.offlineEl.style.display = 'none';
+      }
+
+      showError(message) {
+        this.hideLoading();
+        this.hideOffline();
+        this.errorEl.textContent = message;
+        this.errorEl.style.display = 'block';
+      }
+
+      hideError() {
+        this.errorEl.style.display = 'none';
+      }
+
+      hideElements() {
+        this.videoEl.style.display = 'none';
+        this.mjpegEl.style.display = 'none';
+        this.webrtcEl.style.display = 'none';
+        this.errorEl.style.display = 'none';
+        this.offlineEl.style.display = 'none';
+        this.instructionsEl.style.display = 'none';
+      }
+
+      showLoading(message = 'Loading...') {
+        this.loadingEl.querySelector('div:last-child').textContent = message;
+        this.loadingEl.style.display = 'block';
+      }
+
+      hideLoading() {
+        this.loadingEl.style.display = 'none';
+      }
+
+      showInstructions() {
+        this.instructionsEl.style.display = 'block';
+        this.hideLoading();
+      }
+
+      hideInstructions() {
+        this.instructionsEl.style.display = 'none';
+      }
+
+      hideAllPlayers() {
+        this.videoEl.style.display = 'none';
+        this.mjpegEl.style.display = 'none';
+        this.webrtcEl.style.display = 'none';
+        
+        // Clear any existing video-stream elements
+        const existingStreams = this.container.querySelectorAll('video-stream');
+        existingStreams.forEach(el => el.remove());
+      }
+
+      cleanup() {
+        this.hideError();
+        this.hideAllPlayers();
+        this.hideOffline();
+        
+        if (this.mjpegInterval) {
+          clearInterval(this.mjpegInterval);
+          this.mjpegInterval = null;
+        }
+
+        if (this.currentPlayer) {
+          try {
+            if (this.currentType === 'flv' && this.currentPlayer.destroy) {
+              this.currentPlayer.destroy();
+            } else if (this.currentType === 'hls' && this.currentPlayer.destroy) {
+              this.currentPlayer.destroy();
+            }
+          } catch (e) {
+            console.warn('Cleanup error:', e);
+          }
+          this.currentPlayer = null;
+        }
+
+        this.currentType = null;
+        this.reconnectAttempts = 0;
+      }
+
+      detectStreamType(url) {
+        const urlLower = url.toLowerCase();
+        
+        // YouTube Live streams
+        if (urlLower.includes('youtube.com') || urlLower.includes('youtu.be')) {
+          return 'youtube';
+        }
+        
+        // WebSocket streams
+        if (url.startsWith('wss://') || url.startsWith('ws://')) {
+          return 'websocket';
+        }
+        
+        // WebRTC or iframe content
+        if (url.includes('webrtc') || url.includes('rtc') || 
+            (url.startsWith('http') && (url.includes('player') || url.includes('stream.html')))) {
+          return 'webrtc';
+        }
+        
+        // Image/MJPEG streams - Enhanced detection
+        if (urlLower.includes('.jpg') || urlLower.includes('.jpeg') || 
+            urlLower.includes('.png') || urlLower.includes('mjpeg') || 
+            urlLower.includes('snapshot') || urlLower.includes('/img') ||
+            // ZoneMinder and other CGI-based MJPEG streams
+            urlLower.includes('nph-zms') || urlLower.includes('/zm/') ||
+            urlLower.includes('cgi-bin') && (urlLower.includes('monitor=') || urlLower.includes('cam=')) ||
+            // Other common MJPEG patterns
+            urlLower.includes('mjpg') || urlLower.includes('image.cgi') ||
+            urlLower.includes('video.cgi') && urlLower.includes('resolution=') ||
+            urlLower.includes('axis-cgi') || urlLower.includes('/jpg/') ||
+            // Motion and other surveillance software
+            urlLower.includes('/motion/') || urlLower.includes('stream.jpg') ||
+            // IP Camera common patterns
+            (urlLower.includes('cgi') && (urlLower.includes('jpg') || urlLower.includes('image'))) ||
+            // Query parameters that suggest MJPEG
+            (urlLower.includes('?') && (urlLower.includes('scale=') || urlLower.includes('quality='))) && 
+            !urlLower.includes('.flv') && !urlLower.includes('.m3u8') && !urlLower.includes('.mp4')) {
+          return 'mjpeg';
+        }
+        
+        // Video formats
+        if (urlLower.includes('.flv')) return 'flv';
+        if (urlLower.includes('.m3u8')) return 'hls';
+        if (urlLower.includes('.mp4') || urlLower.includes('.webm') || 
+            urlLower.includes('.ogv') || urlLower.includes('.mpeg')) return 'native';
+        
+        // Stream.html format detection
+        if (url.includes('stream.html') || url.includes('src=') || url.includes('mode=')) {
+          return 'websocket';
+        }
+        
+        // Default fallback
+        return 'native';
+      }
+
+      async loadWebSocketModules() {
+        const pairs = [
+          ['./js/video-stream.js', './js/video-rtc.js'],
+          [location.origin + location.pathname.replace(/\/[^/]*$/, '/') + 'js/video-stream.js', 
+           location.origin + location.pathname.replace(/\/[^/]*$/, '/') + 'js/video-rtc.js'],
+          ['https://kertrtc.etnvps.click/video-stream.js', 'https://kertrtc.etnvps.click/video-rtc.js'],
+          ['https://alexxit.github.io/go2rtc/video-stream.js']
+        ];
+
+        for (const pair of pairs) {
+          try {
+            for (const url of pair) {
+              if (url) await import(url);
+            }
+            return true;
+          } catch (err) {
+            console.warn('Failed to load modules from', pair, err);
+          }
+        }
+        return false;
+      }
+
+      async playWebSocket(url) {
+        const modulesLoaded = await this.loadWebSocketModules();
+        
+        if (!modulesLoaded) {
+          throw new Error('Gagal memuat modul WebSocket. Pastikan file js tersedia atau server dapat diakses.');
+        }
+
+        // Parse URL similar to wss-player2.html logic
+        let streams = [];
+        let modes = [];
+        let baseForApi = null;
+
+        if (url.startsWith('wss://') || url.startsWith('ws://')) {
+          streams = [url];
+          modes = ['mse'];
+        } else if (url.includes('stream.html')) {
+          const u = new URL(url);
+          baseForApi = u.origin;
+          const params = u.searchParams;
+          streams = params.getAll('src') || [params.get('src')].filter(Boolean);
+          modes = params.getAll('mode') || ['mse'];
+        } else if (url.includes('src=')) {
+          const params = new URLSearchParams(url);
+          streams = params.getAll('src') || [params.get('src')].filter(Boolean);
+          modes = params.getAll('mode') || ['mse'];
+        } else {
+          streams = [url];
+          modes = ['mse'];
+          baseForApi = 'https://kertrtc.etnvps.click';
+        }
+
+        // Create video-stream element
+        const vid = document.createElement('video-stream');
+        vid.setAttribute('playsinline', '');
+        vid.setAttribute('autoplay', '');
+        vid.setAttribute('muted', '');
+        vid.background = true;
+
+        let srcToUse = streams[0];
+        if (!(srcToUse.startsWith('wss://') || srcToUse.startsWith('ws://') || 
+              srcToUse.startsWith('http://') || srcToUse.startsWith('https://'))) {
+          if (baseForApi) {
+            srcToUse = baseForApi + '/api/ws?src=' + encodeURIComponent(srcToUse);
+          } else {
+            srcToUse = 'https://kertrtc.etnvps.click/api/ws?src=' + encodeURIComponent(srcToUse);
+          }
+        }
+
+        vid.mode = modes[0] || 'mse';
+        vid.src = srcToUse;
+
+        this.container.appendChild(vid);
+        this.currentPlayer = vid;
+        this.currentType = 'websocket';
+
+        // Set 10-second timer to auto-hide loading if no response
+        let loadingTimeout = setTimeout(() => {
+          this.hideLoading();
+          loadingTimeout = null;
+        }, 10000);
+
+        // Event listeners
+        vid.addEventListener('playing', () => {
+          if (loadingTimeout) {
+            clearTimeout(loadingTimeout);
+            loadingTimeout = null;
+          }
+          this.hideLoading();
+        });
+
+        vid.addEventListener('error', (ev) => {
+          if (loadingTimeout) {
+            clearTimeout(loadingTimeout);
+            loadingTimeout = null;
+          }
+          console.error('WebSocket stream error:', ev);
+          this.showOffline();
+        });
+
+        vid.addEventListener('abort', () => {
+          if (loadingTimeout) {
+            clearTimeout(loadingTimeout);
+            loadingTimeout = null;
+          }
+          this.showOffline();
+        });
+
+        vid.addEventListener('stalled', () => {
+          this.showOffline();
+        });
+      }
+
+      async playFLV(url) {
+        if (!window.flvjs || !flvjs.isSupported()) {
+          throw new Error('Browser tidak mendukung FLV atau flv.js tidak tersedia');
+        }
+
+        this.videoEl.style.display = 'block';
+        
+        const player = flvjs.createPlayer({
+          type: 'flv',
+          url: url
+        }, {
+          enableStashBuffer: false,
+          isLive: true
+        });
+
+        player.attachMediaElement(this.videoEl);
+        player.load();
+        
+        this.currentPlayer = player;
+        this.currentType = 'flv';
+
+        player.on(flvjs.Events.ERROR, (errorType, errorDetail) => {
+          console.error('FLV Error:', errorType, errorDetail);
+          this.showOffline();
+        });
+
+        this.videoEl.addEventListener('loadstart', () => {
+          this.hideLoading();
+        });
+        
+        this.videoEl.addEventListener('error', () => {
+          this.showOffline();
+        });
+
+        this.videoEl.addEventListener('abort', () => {
+          this.showOffline();
+        });
+
+        this.videoEl.addEventListener('stalled', () => {
+          this.showOffline();
+        });
+
+        await player.play();
+      }
+
+      async playHLS(url) {
+        this.videoEl.style.display = 'block';
+
+        if (Hls.isSupported()) {
+          const hls = new Hls();
+          this.currentPlayer = hls;
+          this.currentType = 'hls';
+
+          hls.loadSource(url);
+          hls.attachMedia(this.videoEl);
+
+          hls.on(Hls.Events.MANIFEST_PARSED, async () => {
+          this.hideLoading();
+          await this.videoEl.play();
+        });
+
+          hls.on(Hls.Events.ERROR, (event, data) => {
+            console.error('HLS Error:', data);
+            if (data.fatal) {
+              this.showOffline();
+            }
+          });
+
+          this.videoEl.addEventListener('error', () => {
+            this.showOffline();
+          });
+
+          this.videoEl.addEventListener('abort', () => {
+            this.showOffline();
+          });
+
+          this.videoEl.addEventListener('stalled', () => {
+            this.showOffline();
+          });
+        } else if (this.videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+          this.videoEl.src = url;
+          await this.videoEl.play();
+        } else {
+          throw new Error('Browser tidak mendukung HLS');
+        }
+      }
+
+      async playNative(url) {
+        this.videoEl.style.display = 'block';
+        this.videoEl.src = url;
+        this.currentType = 'native';
+
+        this.videoEl.addEventListener('loadedmetadata', () => {
+          this.hideLoading();
+        });
+
+        this.videoEl.addEventListener('error', () => {
+          this.showOffline();
+        });
+
+        this.videoEl.addEventListener('abort', () => {
+          this.showOffline();
+        });
+
+        this.videoEl.addEventListener('stalled', () => {
+          this.showOffline();
+        });
+
+        await this.videoEl.play();
+      }
+
+      playMJPEG(url) {
+        this.mjpegEl.style.display = 'block';
+        this.currentType = 'mjpeg';
+
+        let isFirstLoad = true;
+        let loadingTimeout;
+
+        // Set up event handlers once - outside of refresh function
+        this.mjpegEl.onerror = () => {
+          if (loadingTimeout) {
+            clearTimeout(loadingTimeout);
+            loadingTimeout = null;
+          }
+          this.showOffline();
+        };
+
+        this.mjpegEl.onload = () => {
+          if (loadingTimeout) {
+            clearTimeout(loadingTimeout);
+            loadingTimeout = null;
+          }
+          if (isFirstLoad) {
+            this.hideLoading();
+            isFirstLoad = false;
+          }
+        };
+
+        const refreshImage = () => {
+          const urlWithTimestamp = url + (url.includes('?') ? '&' : '?') + 'ts=' + Date.now();
+          this.mjpegEl.src = urlWithTimestamp;
+        };
+
+        // Set 10-second timer to auto-hide loading if no response
+        loadingTimeout = setTimeout(() => {
+          this.hideLoading();
+          isFirstLoad = false;
+          loadingTimeout = null;
+        }, 10000);
+
+        // Initial load
+        refreshImage();
+        
+        // Set interval exactly like img-player.html
+        this.mjpegInterval = setInterval(refreshImage, 3000);
+      }
+
+      playWebRTC(url) {
+        this.webrtcEl.style.display = 'block';
+        this.webrtcEl.src = url;
+        this.currentType = 'webrtc';
+
+        this.webrtcEl.onload = () => {
+          this.hideLoading();
+        };
+
+        this.webrtcEl.onerror = () => {
+          this.showOffline();
+        };
+      }
+
+      playYouTube(url) {
+        this.webrtcEl.style.display = 'block';
+        this.currentType = 'youtube';
+
+        // Extract video ID from various YouTube URL formats
+        let videoId = '';
+        
+        if (url.includes('youtube.com/watch?v=')) {
+          videoId = url.split('v=')[1].split('&')[0];
+        } else if (url.includes('youtu.be/')) {
+          videoId = url.split('youtu.be/')[1].split('?')[0];
+        } else if (url.includes('youtube.com/embed/')) {
+          videoId = url.split('embed/')[1].split('?')[0];
+        } else if (url.includes('youtube.com/live/')) {
+          videoId = url.split('live/')[1].split('?')[0];
+        }
+
+        if (!videoId) {
+          this.showError('URL YouTube tidak valid');
+          return;
+        }
+
+        // Create YouTube embed URL with live stream parameters
+        const embedUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&controls=1&rel=0&modestbranding=1&playsinline=1`;
+        
+        this.webrtcEl.src = embedUrl;
+
+        // Set 10-second timer to auto-hide loading if no response
+        let loadingTimeout = setTimeout(() => {
+          this.hideLoading();
+          loadingTimeout = null;
+        }, 10000);
+
+        this.webrtcEl.onload = () => {
+          if (loadingTimeout) {
+            clearTimeout(loadingTimeout);
+            loadingTimeout = null;
+          }
+          this.hideLoading();
+        };
+
+        this.webrtcEl.onerror = () => {
+          if (loadingTimeout) {
+            clearTimeout(loadingTimeout);
+            loadingTimeout = null;
+          }
+          this.showOffline();
+        };
+      }
+
+
+
+      async playStream(url) {
+        this.cleanup();
+        this.hideInstructions();
+        this.showLoading('Mendeteksi format stream...');
+
+        try {
+          const streamType = this.detectStreamType(url);
+
+          this.showLoading('Memuat player...');
+
+          switch (streamType) {
+            case 'websocket':
+              await this.playWebSocket(url);
+              break;
+            case 'flv':
+              await this.playFLV(url);
+              break;
+            case 'hls':
+              await this.playHLS(url);
+              break;
+            case 'mjpeg':
+              this.playMJPEG(url);
+              break;
+            case 'webrtc':
+              this.playWebRTC(url);
+              break;
+            case 'youtube':
+              this.playYouTube(url);
+              break;
+            case 'native':
+            default:
+              await this.playNative(url);
+              break;
+          }
+
+          // Setup common video events
+          if (this.videoEl.style.display === 'block') {
+            this.videoEl.addEventListener('playing', () => {
+              this.hideLoading();
+            });
+
+            this.videoEl.addEventListener('waiting', () => {
+              // Video is buffering
+            });
+          }
+
+
+
+        } catch (error) {
+          console.error('Playback error:', error);
+          this.showError(error.message || 'Gagal memutar stream');
+        }
+      }
+
+      init() {
+        // Parse URL hash
+        const hash = window.location.hash.substring(1);
+        const url = hash ? decodeURIComponent(hash) : '';
+
+        if (!url) {
+          this.showInstructions();
+          return;
+        }
+
+        this.playStream(url);
+
+        // Listen for hash changes
+        window.addEventListener('hashchange', () => {
+          const newHash = window.location.hash.substring(1);
+          const newUrl = newHash ? decodeURIComponent(newHash) : '';
+          
+          if (newUrl) {
+            this.playStream(newUrl);
+          } else {
+            this.cleanup();
+            this.showInstructions();
+          }
+        });
+      }
+    }
+
+    // Initialize the universal player
+    const player = new UniversalPlayer();
+  </script>
+</body>
+</html>
