@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Player Ultimate</title>
+  <style>
+    /* Mengatur halaman dan body agar menempati seluruh viewport */
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%; /* Memastikan tinggi penuh */
+      overflow: hidden; /* Mencegah scrollbar muncul jika tidak diperlukan */
+      background: black;
+    }
+
+    /* Gaya dasar untuk elemen player */
+    #player, #mjpegPlayer {
+      width: 100vw; /* Lebar 100% viewport */
+      height: 100vh; /* Tinggi 100% viewport */
+      object-fit: contain; /* Menjaga aspek rasio video tanpa terpotong */
+      background: black; /* Latar belakang hitam untuk area player */
+      display: none; /* Sembunyikan secara default, akan ditampilkan oleh JS */
+    }
+  </style>
+</head>
+<body>
+  <video id="player" autoplay muted playsinline></video>
+  <img id="mjpegPlayer" />
+
+  <script src="https://cdn.jsdelivr.net/npm/flv.js@1.6.2/dist/flv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+
+  <script>
+    // Cache elemen DOM untuk efisiensi
+    const mainVideoElement = document.getElementById('player');
+    const mjpegImageElement = document.getElementById('mjpegPlayer');
+
+    /**
+     * Mengambil URL stream dari bagian hash di alamat browser.
+     * Misalnya, dari 'http://example.com/#http://stream.video/live.m3u8' akan mengembalikan 'http://stream.video/live.m3u8'.
+     * @returns {string|null} URL stream yang ditemukan, atau null jika tidak ada hash.
+     */
+    function getStreamUrlFromBrowserHash() {
+      // Mengambil bagian hash (setelah '#'), menghilangkan '#' di awal, dan mendekode URI
+      const hashContent = window.location.hash.substring(1);
+      return hashContent ? decodeURIComponent(hashContent) : null;
+    }
+
+    /**
+     * Memeriksa apakah URL yang diberikan adalah URL untuk stream gambar MJPEG (snapshot).
+     * @param {string} url URL yang akan diperiksa.
+     * @returns {boolean} True jika URL cocok dengan pola MJPEG snapshot.
+     */
+    function isMjpegSnapshotStream(url) {
+      // Menggunakan regex untuk mendeteksi pola umum URL MJPEG snapshot
+      return /\/img|format=jpeg|\.mjpg|\.mjpeg/i.test(url);
+    }
+
+    /**
+     * Memainkan stream MJPEG dengan memperbarui sumber gambar secara berkala.
+     * Cocok untuk kamera CCTV yang mengirimkan gambar tunggal berulang kali.
+     * @param {string} streamUrl URL dari stream MJPEG.
+     */
+    function playMjpegSnapshot(streamUrl) {
+      mainVideoElement.style.display = 'none'; // Pastikan player video tersembunyi
+      mjpegImageElement.style.display = 'block'; // Tampilkan elemen gambar
+
+      // Memperbarui src gambar setiap detik untuk menciptakan efek stream
+      // Menambahkan timestamp (_ts) untuk mencegah caching browser dan memaksa refresh gambar
+      setInterval(() => {
+        mjpegImageElement.src = streamUrl + (streamUrl.includes('?') ? '&' : '?') + '_ts=' + Date.now();
+      }, 1000);
+    }
+
+    /**
+     * Memainkan stream FLV (Flash Video) menggunakan library flv.js.
+     * @param {string} streamUrl URL dari stream FLV.
+     */
+    function playFlvStream(streamUrl) {
+      if (flvjs.isSupported()) { // Memastikan browser mendukung flv.js
+        mjpegImageElement.style.display = 'none'; // Pastikan player gambar tersembunyi
+        mainVideoElement.style.display = 'block'; // Tampilkan elemen video
+
+        const flvPlayer = flvjs.createPlayer({ type: 'flv', url: streamUrl }, { isLive: true });
+        flvPlayer.attachMediaElement(mainVideoElement);
+        flvPlayer.load();
+        flvPlayer.play();
+      } else {
+        console.error('FLV.js tidak didukung di browser ini.');
+        alert('Maaf, browser Anda tidak mendukung format video FLV.');
+      }
+    }
+
+    /**
+     * Memainkan stream HLS (HTTP Live Streaming) atau video MP4 biasa.
+     * Menggunakan hls.js jika didukung, atau fallback ke dukungan native browser.
+     * @param {string} streamUrl URL dari stream HLS (.m3u8) atau video MP4 (.mp4).
+     */
+    function playHlsOrMp4Stream(streamUrl) {
+      mjpegImageElement.style.display = 'none'; // Pastikan player gambar tersembunyi
+      mainVideoElement.style.display = 'block'; // Tampilkan elemen video
+
+      if (Hls.isSupported()) { // Memeriksa dukungan hls.js
+        const hls = new Hls();
+        hls.loadSource(streamUrl);
+        hls.attachMedia(mainVideoElement);
+        // Putar video setelah manifest (daftar segmen video) berhasil diurai
+        hls.on(Hls.Events.MANIFEST_PARSED, () => mainVideoElement.play());
+      } else if (mainVideoElement.canPlayType('application/vnd.apple.mpegurl')) {
+        // Fallback untuk dukungan HLS native (khususnya di Safari dan iOS)
+        mainVideoElement.src = streamUrl;
+        // Putar video setelah metadata video dimuat
+        mainVideoElement.onloadedmetadata = () => mainVideoElement.play();
+      } else {
+        console.error('HLS.js tidak didukung di browser ini dan tidak ada dukungan HLS native.');
+        alert('Maaf, browser Anda tidak mendukung format video ini (HLS/MP4).');
+      }
+    }
+
+    /**
+     * Mendeteksi jenis stream berdasarkan URL dan memutar stream yang sesuai.
+     * Ini adalah fungsi utama untuk memulai pemutaran video.
+     * @param {string|null} streamUrl URL stream yang akan dideteksi dan diputar.
+     */
+    function detectAndPlayAppropriateStream(streamUrl) {
+      if (!streamUrl) {
+        alert("URL stream tidak ditemukan. Harap sertakan URL video/stream setelah '#' di alamat browser Anda.\nContoh: yourpage.html#https://example.com/live_stream.m3u8");
+        return;
+      }
+
+      const normalizedUrl = streamUrl.toLowerCase(); // Normalisasi URL ke huruf kecil untuk perbandingan yang konsisten
+
+      if (isMjpegSnapshotStream(normalizedUrl)) {
+        playMjpegSnapshot(streamUrl);
+      } else if (normalizedUrl.endsWith(".flv")) {
+        playFlvStream(streamUrl);
+      } else if (normalizedUrl.includes(".m3u8") || normalizedUrl.endsWith(".mp4")) {
+        playHlsOrMp4Stream(streamUrl);
+      } else {
+        alert("Format stream tidak dikenali. Saat ini hanya mendukung stream FLV (.flv), HLS (.m3u8), MP4 (.mp4), atau MJPEG snapshot.");
+      }
+    }
+
+    // Ketika seluruh konten DOM telah dimuat, jalankan logika utama
+    window.addEventListener('DOMContentLoaded', () => {
+      const initialStreamUrl = getStreamUrlFromBrowserHash();
+      detectAndPlayAppropriateStream(initialStreamUrl);
+
+      // Mencoba masuk ke mode fullscreen secara otomatis saat halaman dimuat.
+      // Catatan: Browser modern seringkali memblokir aksi fullscreen tanpa interaksi pengguna.
+      const documentElement = document.documentElement;
+      if (documentElement.requestFullscreen) {
+        documentElement.requestFullscreen().catch((error) => {
+          console.warn('Gagal masuk mode fullscreen otomatis:', error);
+          // Anda bisa memberikan instruksi kepada pengguna untuk melakukan tap/klik layar untuk fullscreen
+        });
+      }
+    });
+  </script>
+</body>
+</html>
