@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -339,6 +340,7 @@
       }
 
       async loadWebSocketModules() {
+        console.log('Attempting to load WebSocket modules...');
         const pairs = [
           ['./js/video-stream.js', './js/video-rtc.js'],
           [location.origin + location.pathname.replace(/\/[^/]*$/, '/') + 'js/video-stream.js', 
@@ -349,24 +351,32 @@
 
         for (const pair of pairs) {
           try {
+            console.log('Trying to load modules from:', pair);
             for (const url of pair) {
-              if (url) await import(url);
+              if (url) {
+                console.log('Loading:', url);
+                await import(url);
+              }
             }
+            console.log('Successfully loaded modules from:', pair);
             return true;
           } catch (err) {
-            console.warn('Failed to load modules from', pair, err);
+            console.warn('Failed to load modules from', pair, err.message);
           }
         }
+        console.log('All module loading attempts failed, using fallback');
         return false;
       }
 
-      async playWebSocket(url) {
-        const modulesLoaded = await this.loadWebSocketModules();
+      playWebSocket(url) {
+        console.log('playWebSocket called with URL:', url);
         
-        if (!modulesLoaded) {
-          throw new Error('Gagal memuat modul WebSocket. Pastikan file js tersedia atau server dapat diakses.');
-        }
+        // Skip module loading and go directly to fallback
+        console.log('Using native MSE fallback directly');
+        this.playWebSocketFallback(url);
+      }
 
+      playWebSocketWithModule(url) {
         // Parse URL similar to wss-player2.html logic
         let streams = [];
         let modes = [];
@@ -430,12 +440,11 @@
           this.hideLoading();
         });
 
-        vid.addEventListener('error', (ev) => {
+        vid.addEventListener('error', () => {
           if (loadingTimeout) {
             clearTimeout(loadingTimeout);
             loadingTimeout = null;
           }
-          console.error('WebSocket stream error:', ev);
           this.showOffline();
         });
 
@@ -448,6 +457,169 @@
         });
 
         vid.addEventListener('stalled', () => {
+          this.showOffline();
+        });
+      }
+
+      playWebSocketFallback(url) {
+        console.warn('Menggunakan native MSE WebSocket player:', url);
+        
+        // Create video element for MSE playback
+        const video = document.createElement('video');
+        video.setAttribute('autoplay', '');
+        video.setAttribute('muted', '');
+        video.setAttribute('playsinline', '');
+        video.style.cssText = `
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+          background: black;
+        `;
+        
+        this.container.appendChild(video);
+        this.currentPlayer = video;
+        this.currentType = 'websocket';
+
+        // Check MediaSource support
+        if (!window.MediaSource) {
+          console.error('MediaSource tidak didukung di browser ini');
+          this.showOffline();
+          return;
+        }
+
+        // MSE variables
+        let mseQueue = [];
+        let mseSourceBuffer;
+        let mseStreamingStarted = false;
+        let currentWs = null;
+        let mse = new MediaSource();
+
+        video.src = window.URL.createObjectURL(mse);
+        console.log('MSE URL created:', video.src);
+
+        // Set 10-second timer to auto-hide loading if no response
+        let loadingTimeout = setTimeout(() => {
+          console.warn('WSS timeout setelah 10 detik');
+          this.hideLoading();
+          this.showOffline();
+          if (currentWs) {
+            currentWs.close();
+            console.log('WebSocket ditutup karena timeout');
+          }
+        }, 10000);
+
+        // MSE event handlers
+        const pushPacket = () => {
+          if (!mseSourceBuffer.updating && mseQueue.length > 0) {
+            mseSourceBuffer.appendBuffer(mseQueue.shift());
+          } else {
+            mseStreamingStarted = false;
+          }
+        };
+
+        const readPacket = (packet) => {
+          if (!mseStreamingStarted) {
+            mseSourceBuffer.appendBuffer(packet);
+            mseStreamingStarted = true;
+            return;
+          }
+          mseQueue.push(packet);
+          if (!mseSourceBuffer.updating) {
+            pushPacket();
+          }
+        };
+
+        mse.addEventListener('sourceopen', () => {
+          console.log('MSE sourceopen event triggered');
+          if (loadingTimeout) {
+            clearTimeout(loadingTimeout);
+            loadingTimeout = null;
+          }
+          
+          if (currentWs) currentWs.close();
+          if (mseSourceBuffer) {
+            try {
+              mseSourceBuffer.abort();
+              mse.removeSourceBuffer(mseSourceBuffer);
+            } catch (e) {
+              console.warn('Error removing SourceBuffer:', e);
+            }
+            mseQueue = [];
+            mseStreamingStarted = false;
+          }
+
+          console.log('Mencoba koneksi WebSocket ke:', url);
+          const ws = new WebSocket(url);
+          currentWs = ws;
+          ws.binaryType = 'arraybuffer';
+
+          ws.onopen = () => {
+            console.log('WebSocket terhubung successfully');
+          };
+
+          ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            if (loadingTimeout) {
+              clearTimeout(loadingTimeout);
+              loadingTimeout = null;
+            }
+            this.hideLoading();
+            this.showOffline();
+          };
+
+          ws.onclose = (event) => {
+            console.log('WebSocket ditutup:', event.code, event.reason);
+            if (loadingTimeout) {
+              clearTimeout(loadingTimeout);
+              loadingTimeout = null;
+            }
+            this.hideLoading();
+            this.showOffline();
+          };
+
+          ws.onmessage = (event) => {
+            console.log('Menerima data WebSocket, size:', event.data.byteLength);
+            const data = new Uint8Array(event.data);
+            if (data[0] === 9) {
+              console.log('Menerima codec info');
+              const decoded = data.slice(1);
+              let mimeCodec = 'video/mp4; codecs="avc1.42E01E"';
+              try {
+                mimeCodec = 'video/mp4; codecs="' + new TextDecoder('utf-8').decode(decoded) + '"';
+                console.log('Codec detected:', mimeCodec);
+              } catch (e) {
+                console.warn('Fallback codec used:', mimeCodec);
+              }
+              try {
+                mseSourceBuffer = mse.addSourceBuffer(mimeCodec);
+                mseSourceBuffer.mode = 'segments';
+                mseSourceBuffer.addEventListener('updateend', pushPacket);
+                console.log('SourceBuffer created successfully');
+              } catch (e) {
+                console.error('Error creating SourceBuffer:', e);
+              }
+            } else {
+              console.log('Menerima video packet');
+              readPacket(event.data);
+            }
+          };
+        });
+
+        // Video event listeners
+        video.addEventListener('playing', () => {
+          if (loadingTimeout) {
+            clearTimeout(loadingTimeout);
+            loadingTimeout = null;
+          }
+          this.hideLoading();
+        });
+
+        video.addEventListener('error', () => {
+          if (loadingTimeout) {
+            clearTimeout(loadingTimeout);
+            loadingTimeout = null;
+          }
+          this.hideLoading();
           this.showOffline();
         });
       }
