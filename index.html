@@ -497,32 +497,72 @@
         video.src = window.URL.createObjectURL(mse);
         console.log('MSE URL created:', video.src);
 
-        // Set 10-second timer to auto-hide loading if no response
+        // Set 15-second timer to auto-hide loading if no response
         let loadingTimeout = setTimeout(() => {
-          console.warn('WSS timeout setelah 10 detik');
           this.hideLoading();
           this.showOffline();
           if (currentWs) {
             currentWs.close();
-            console.log('WebSocket ditutup karena timeout');
           }
-        }, 10000);
+        }, 15000);
+        
+        // Track data reception
+        let lastDataTime = Date.now();
+        let dataCheckInterval = setInterval(() => {
+          const now = Date.now();
+          if (now - lastDataTime > 10000) { // No data for 10 seconds
+            this.showOffline();
+            if (currentWs) {
+              currentWs.close();
+            }
+            clearInterval(dataCheckInterval);
+          }
+        }, 5000);
 
         // MSE event handlers
         const pushPacket = () => {
           if (!mseSourceBuffer.updating && mseQueue.length > 0) {
-            mseSourceBuffer.appendBuffer(mseQueue.shift());
+            try {
+              const packet = mseQueue.shift();
+              mseSourceBuffer.appendBuffer(packet);
+            } catch (e) {
+              console.error('Error appending buffer:', e);
+              // Clear queue on error
+              mseQueue = [];
+              mseStreamingStarted = false;
+            }
           } else {
             mseStreamingStarted = false;
           }
         };
 
         const readPacket = (packet) => {
-          if (!mseStreamingStarted) {
-            mseSourceBuffer.appendBuffer(packet);
-            mseStreamingStarted = true;
+          if (!mseSourceBuffer) {
             return;
           }
+          
+          if (!mseStreamingStarted) {
+            try {
+              mseSourceBuffer.appendBuffer(packet);
+              mseStreamingStarted = true;
+              
+              // Clear loading and try to play
+              if (loadingTimeout) {
+                clearTimeout(loadingTimeout);
+                loadingTimeout = null;
+              }
+              this.hideLoading();
+              
+              // Attempt to play video
+              video.play().catch(e => {
+                // Auto-play failed silently
+              });
+            } catch (e) {
+              console.error('Error starting MSE streaming:', e);
+            }
+            return;
+          }
+          
           mseQueue.push(packet);
           if (!mseSourceBuffer.updating) {
             pushPacket();
@@ -530,7 +570,6 @@
         };
 
         mse.addEventListener('sourceopen', () => {
-          console.log('MSE sourceopen event triggered');
           if (loadingTimeout) {
             clearTimeout(loadingTimeout);
             loadingTimeout = null;
@@ -542,70 +581,123 @@
               mseSourceBuffer.abort();
               mse.removeSourceBuffer(mseSourceBuffer);
             } catch (e) {
-              console.warn('Error removing SourceBuffer:', e);
+              // Ignore removal errors
             }
             mseQueue = [];
             mseStreamingStarted = false;
           }
 
-          console.log('Mencoba koneksi WebSocket ke:', url);
-          const ws = new WebSocket(url);
-          currentWs = ws;
-          ws.binaryType = 'arraybuffer';
 
-          ws.onopen = () => {
-            console.log('WebSocket terhubung successfully');
+          
+          // Add connection retry mechanism
+          let retryCount = 0;
+          const maxRetries = 3;
+          
+          const connectWebSocket = () => {
+            const ws = new WebSocket(url);
+             currentWs = ws;
+             ws.binaryType = 'arraybuffer';
+             
+             // Connection timeout
+             const connectionTimeout = setTimeout(() => {
+               if (ws.readyState === WebSocket.CONNECTING) {
+                 ws.close();
+               }
+             }, 5000);
+             
+             ws.onopen = () => {
+               clearTimeout(connectionTimeout);
+               retryCount = 0; // Reset retry count on successful connection
+             };
+            
+            ws.onerror = (error) => {
+               clearTimeout(connectionTimeout);
+               
+               if (retryCount < maxRetries) {
+                 retryCount++;
+                 setTimeout(connectWebSocket, 2000);
+                 return;
+               }
+               
+               if (loadingTimeout) {
+                 clearTimeout(loadingTimeout);
+                 loadingTimeout = null;
+               }
+               if (dataCheckInterval) {
+                 clearInterval(dataCheckInterval);
+               }
+               this.hideLoading();
+               this.showOffline();
+             };
+             
+             ws.onclose = (event) => {
+               clearTimeout(connectionTimeout);
+               
+               if (event.code !== 1000 && retryCount < maxRetries) { // Not normal closure
+                 retryCount++;
+                 setTimeout(connectWebSocket, 2000);
+                 return;
+               }
+               
+               if (loadingTimeout) {
+                 clearTimeout(loadingTimeout);
+                 loadingTimeout = null;
+               }
+               if (dataCheckInterval) {
+                 clearInterval(dataCheckInterval);
+               }
+               this.hideLoading();
+               this.showOffline();
+             };
+            
+            return ws;
           };
-
-          ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
-            if (loadingTimeout) {
-              clearTimeout(loadingTimeout);
-              loadingTimeout = null;
-            }
-            this.hideLoading();
-            this.showOffline();
-          };
-
-          ws.onclose = (event) => {
-            console.log('WebSocket ditutup:', event.code, event.reason);
-            if (loadingTimeout) {
-              clearTimeout(loadingTimeout);
-              loadingTimeout = null;
-            }
-            this.hideLoading();
-            this.showOffline();
-          };
+          
+          const ws = connectWebSocket();
 
           ws.onmessage = (event) => {
-            console.log('Menerima data WebSocket, size:', event.data.byteLength);
+            lastDataTime = Date.now(); // Update last data time
             const data = new Uint8Array(event.data);
+            
             if (data[0] === 9) {
-              console.log('Menerima codec info');
               const decoded = data.slice(1);
               let mimeCodec = 'video/mp4; codecs="avc1.42E01E"';
               try {
                 mimeCodec = 'video/mp4; codecs="' + new TextDecoder('utf-8').decode(decoded) + '"';
-                console.log('Codec detected:', mimeCodec);
               } catch (e) {
-                console.warn('Fallback codec used:', mimeCodec);
+                // Use fallback codec
               }
               try {
                 mseSourceBuffer = mse.addSourceBuffer(mimeCodec);
                 mseSourceBuffer.mode = 'segments';
-                mseSourceBuffer.addEventListener('updateend', pushPacket);
-                console.log('SourceBuffer created successfully');
+                
+                mseSourceBuffer.addEventListener('updateend', () => {
+                  pushPacket();
+                });
+                
+                mseSourceBuffer.addEventListener('error', (e) => {
+                  console.error('SourceBuffer error:', e);
+                });
+                
               } catch (e) {
                 console.error('Error creating SourceBuffer:', e);
+                this.showOffline();
               }
             } else {
-              console.log('Menerima video packet');
               readPacket(event.data);
             }
           };
         });
 
         // Video event listeners
+        video.addEventListener('canplay', () => {
+          if (loadingTimeout) {
+            clearTimeout(loadingTimeout);
+            loadingTimeout = null;
+          }
+          this.hideLoading();
+        });
+        
         video.addEventListener('playing', () => {
           if (loadingTimeout) {
             clearTimeout(loadingTimeout);
@@ -614,7 +706,8 @@
           this.hideLoading();
         });
 
-        video.addEventListener('error', () => {
+        video.addEventListener('error', (e) => {
+          console.error('Video error:', e, video.error);
           if (loadingTimeout) {
             clearTimeout(loadingTimeout);
             loadingTimeout = null;
